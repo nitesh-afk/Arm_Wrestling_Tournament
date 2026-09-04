@@ -7,6 +7,8 @@ import {
   removeAthleteFromCategory,
   getPodium,
   deleteCategory,
+  generateCategoryBracket,
+  getCategoryBracketTree,
 } from '../controllers/categoryController.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
@@ -30,6 +32,12 @@ router
 router
   .route('/:id/athletes/:athleteId')
   .delete(authenticate, requireRole('ADMIN'), removeAthleteFromCategory);
+
+router
+  .route('/:id/generate-bracket')
+  .post(authenticate, requireRole('ADMIN'), generateCategoryBracket);
+
+router.route('/:id/bracket').get(getCategoryBracketTree);
 
 router.route('/:id/podium').get(getPodium);
 

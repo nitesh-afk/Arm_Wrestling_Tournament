@@ -1,6 +1,8 @@
 import { Category } from '../models/Category.js';
 import { Tournament } from '../models/Tournament.js';
 import { Athlete } from '../models/Athlete.js';
+import { Match } from '../models/Match.js';
+import { generateDoubleEliminationBracket } from '../services/bracketEngine.js';
 
 // @desc    Create a new tournament category
 // @route   POST /api/categories
@@ -314,3 +316,137 @@ export const deleteCategory = async (req, res) => {
     });
   }
 };
+
+// @desc    Generate WAF/IFA Double-Elimination bracket for a category
+// @route   POST /api/categories/:id/generate-bracket
+// @access  Private (Admin only)
+export const generateCategoryBracket = async (req, res) => {
+  try {
+    const categoryId = req.params.id;
+
+    const category = await Category.findById(categoryId).populate('athletes');
+    if (!category) {
+      return res.status(404).json({
+        success: false,
+        message: 'Category not found.',
+      });
+    }
+
+    if (category.bracketStatus !== 'DRAFT') {
+      return res.status(400).json({
+        success: false,
+        message: `Bracket is already ${category.bracketStatus}. Reset required to regenerate.`,
+      });
+    }
+
+    if (!category.athletes || category.athletes.length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least 2 registered athletes are required to generate a bracket.',
+      });
+    }
+
+    // Extract athlete IDs
+    const athleteIds = category.athletes.map((a) => a._id);
+
+    // Run bracket generator algorithm
+    const matches = await generateDoubleEliminationBracket(
+      categoryId,
+      category.tournamentId,
+      athleteIds,
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: `Successfully generated WAF/IFA double-elimination bracket with ${matches.length} matches.`,
+      matchesCount: matches.length,
+      categoryStatus: 'GENERATED',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error generating category bracket.',
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Get complete visual bracket tree for a category
+// @route   GET /api/categories/:id/bracket
+// @access  Public
+export const getCategoryBracketTree = async (req, res) => {
+  try {
+    const categoryId = req.params.id;
+
+    const category = await Category.findById(categoryId)
+      .populate('podium.gold', 'name club country')
+      .populate('podium.silver', 'name club country')
+      .populate('podium.bronze', 'name club country')
+      .populate('podium.fourth', 'name club country');
+
+    if (!category) {
+      return res.status(404).json({
+        success: false,
+        message: 'Category not found.',
+      });
+    }
+
+    const matches = await Match.find({ categoryId })
+      .populate('athleteA', 'name club country officialWeightKg')
+      .populate('athleteB', 'name club country officialWeightKg')
+      .populate('winner', 'name club country')
+      .populate('loser', 'name club country')
+      .sort({ roundNumber: 1, matchIndex: 1 });
+
+    // Group matches by bracket type and round
+    const winnersBracket = {};
+    const losersBracket = {};
+    let grandFinals = null;
+    let grandFinalsReset = null;
+
+    matches.forEach((m) => {
+      if (m.bracketType === 'WINNERS_BRACKET') {
+        if (!winnersBracket[m.roundNumber]) {
+          winnersBracket[m.roundNumber] = [];
+        }
+        winnersBracket[m.roundNumber].push(m);
+      } else if (m.bracketType === 'LOSERS_BRACKET') {
+        if (!losersBracket[m.roundNumber]) {
+          losersBracket[m.roundNumber] = [];
+        }
+        losersBracket[m.roundNumber].push(m);
+      } else if (m.bracketType === 'GRAND_FINALS') {
+        grandFinals = m;
+      } else if (m.bracketType === 'GRAND_FINALS_RESET') {
+        grandFinalsReset = m;
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      category: {
+        _id: category._id,
+        name: category.name,
+        arm: category.arm,
+        gender: category.gender,
+        division: category.division,
+        bracketStatus: category.bracketStatus,
+        podium: category.podium,
+      },
+      bracket: {
+        winnersBracket,
+        losersBracket,
+        grandFinals,
+        grandFinalsReset,
+        totalMatches: matches.length,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching category bracket tree.',
+      error: error.message,
+    });
+  }
+};
+
