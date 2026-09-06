@@ -6,6 +6,7 @@ import {
   updateTournament,
   deleteTournament,
 } from '../controllers/tournamentController.js';
+import { getTableQueues } from '../controllers/matchController.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
 
@@ -21,5 +22,7 @@ router
   .get(getTournamentById)
   .patch(authenticate, requireRole('ADMIN'), updateTournament)
   .delete(authenticate, requireRole('ADMIN'), deleteTournament);
+
+router.route('/:id/tables/queue').get(getTableQueues);
 
 export default router;
